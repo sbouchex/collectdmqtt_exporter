@@ -13,3 +13,8 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+collectdmqtt_exporter.exe
+configuration.json
+collectdmqtt_exporter.json
+.vscode/launch.json
