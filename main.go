@@ -81,8 +81,8 @@ func metricType(m MappingEntry) (prometheus.ValueType, error) {
 	return prometheus.GaugeValue, nil
 }
 
-func metricKey(host string, group string, name string, instance string, index string) string {
-	return fmt.Sprintf("%s-%s-%s-%s-%s", host, group, name, instance, index)
+func metricKey(host string, group string, name string, instance string, index string, vindex int) string {
+	return fmt.Sprintf("%s-%s-%s-%s-%s-%d", host, group, name, instance, index, vindex)
 }
 
 type newcollectdmqttSample struct {
@@ -182,8 +182,7 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 
 	var partsMessage = strings.Split(stData, ":")
 	if len(partsMessage) > 1 {
-		var value = partsMessage[1]
-		log.Debugf("Received value: %s from topic: %s", value, msg.Topic())
+		log.Debugf("Received value: %s from topic: %s", partsMessage[1], msg.Topic())
 
 		var partsTopic = strings.Split(msg.Topic(), "/")
 		if len(partsTopic) > 2 {
@@ -191,11 +190,11 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 				var host = partsTopic[1]
 				var groupPart = partsTopic[2]
 				var group = ""
-				var instance = ""
+				var cinstance = ""
 				var indexGroup = strings.Index(groupPart, "-")
 				if indexGroup > 0 {
 					group = groupPart[:indexGroup]
-					instance = groupPart[indexGroup+1:]
+					cinstance = groupPart[indexGroup+1:]
 				} else {
 					group = groupPart
 				}
@@ -211,48 +210,56 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 					name = namePart
 				}
 
-				var key = group + "." + name
-				metric, found := configuration.Mappings[key]
-				if found {
-					keep := true
-					var instances = metric.Instances
-					if instances != nil {
-						keep = false
-						for _, instanceI := range instances {
-							if instanceI == instance {
-								keep = true
-								break
+				for vindex, value := range partsMessage {
+					if vindex == 0 {
+						continue
+					}
+					var key = group + "." + name
+					metric, found := configuration.Mappings[key]
+					if found {
+						keep := true
+						var instances = metric.Instances
+						if instances != nil {
+							keep = false
+							for _, instanceI := range instances {
+								if instanceI == cinstance {
+									keep = true
+									break
+								}
 							}
 						}
-					}
-					if !keep {
-						return
-					}
-					log.Debugf("Received value: %s for host %s for group %s[%s] and name %s[%s]", value, host, group, instance, name, index)
-					valueF, err := parseValue(value)
-					if err == nil {
-						now := time.Now()
-						lastPush.Set(float64(now.UnixNano()) / 1e9)
-						metricType, err := metricType(metric)
+						if !keep {
+							return
+						}
+						log.Debugf("Received value: %s for host %s for group %s[%s] and name %s[%s]/%d", value, host, group, cinstance, name, index, vindex)
+						valueF, err := parseValue(value)
 						if err == nil {
-							labels := prometheus.Labels{}
-							if host != "" {
-								labels["host"] = host
-							}
-							if instance != "" {
-								labels["instance"] = instance
-							}
-							if index != "" {
-								labels["index"] = index
-							}
-							collector.ch <- &newcollectdmqttSample{
-								Id:      metricKey(host, group, name, instance, index),
-								Name:    metricName(group, name),
-								Labels:  labels,
-								Help:    metricHelp(group, name),
-								Value:   valueF,
-								Type:    metricType,
-								Expires: now.Add(time.Duration(300) * time.Second * 2),
+							now := time.Now()
+							lastPush.Set(float64(now.UnixNano()) / 1e9)
+							metricType, err := metricType(metric)
+							if err == nil {
+								labels := prometheus.Labels{}
+								if host != "" {
+									labels["host"] = host
+								}
+								if cinstance != "" {
+									labels["cinstance"] = cinstance
+								}
+								if index != "" {
+									labels["index"] = index
+								}
+								if len(partsMessage) > 2 {
+									labels["vindex"] = fmt.Sprintf("%d", vindex-1)
+								}
+								collector.ch <- &newcollectdmqttSample{
+									Id:      metricKey(host, group, name, cinstance, index, vindex),
+									Name:    metricName(group, name),
+									Labels:  labels,
+									Help:    metricHelp(group, name),
+									Value:   valueF,
+									Type:    metricType,
+									Expires: now.Add(time.Duration(300) * time.Second * 2),
+								}
 							}
 						}
 					}
