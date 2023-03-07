@@ -7,4 +7,4 @@ FROM alpine
 WORKDIR /collectdmqtt_exporter_data
 COPY --from=builder /build/collectdmqtt_exporter /collectdmqtt_exporter
 CMD ["/collectdmqtt_exporter"]
-EXPOSE 9103
+EXPOSE 9393
